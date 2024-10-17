@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/gob"
 	mapset "github.com/deckarep/golang-set"
+	lru "github.com/hashicorp/golang-lru"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -13,14 +15,16 @@ type LocalUdpConn struct {
 	*net.UDPConn
 }
 type Client struct {
-	msgId sync.Map
+	msgIdAlloc *lru.Cache
+	msgIdCache *lru.Cache
 }
 type Server struct {
-	msgId sync.Map
+	msgIdAlloc *lru.Cache
+	msgIdCache *lru.Cache
 }
 type Message struct {
 	ID    string
-	msgID uint
+	MsgID int
 	Data  []byte
 }
 
@@ -32,7 +36,7 @@ func ConvertAddr(addr net.Addr) net.UDPAddr {
 	return *v
 }
 
-func (c *LocalUdpConn) WriteMessage(ID string, msgId uint, Data []byte) (int, error) {
+func (c *LocalUdpConn) WriteMessage(ID string, msgId int, Data []byte) (int, error) {
 	msg := Message{ID, msgId, Data}
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
@@ -73,7 +77,7 @@ func (c *LocalUdpConn) ReadFromMessage() (*Message, net.UDPAddr, error) {
 	}
 	return &msg, udpAddr, nil
 }
-func (c *LocalUdpConn) WriteToMessage(ID string, msgId uint, addr *net.UDPAddr, Data []byte) (int, error) {
+func (c *LocalUdpConn) WriteToMessage(ID string, msgId int, addr *net.UDPAddr, Data []byte) (int, error) {
 	msg := Message{ID, msgId, Data}
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
@@ -127,7 +131,9 @@ func (c *Client) listenMiddleAnd2client(udp *net.UDPConn, id2conId *sync.Map, mi
 					panic("err")
 				}
 				v2 := v.(net.Addr)
-				udp.WriteTo(message.Data, v2)
+				if c.filterMsg(conID, message.MsgID) {
+					udp.WriteTo(message.Data, v2)
+				}
 			}
 		}()
 	}
@@ -162,14 +168,33 @@ func (c *Client) ListenRawAnd2Middle(port int, middleServers []string) {
 		c.forward2Middle(conId, buffer[:n], ms)
 	}
 }
-func (c *Client) getMsgID(conID string) uint {
-	v, ok := c.msgId.LoadOrStore(conID, 0)
-	if !ok {
-		panic("err")
+func (c *Client) getMsgID(conID string) int {
+	if c.msgIdAlloc == nil {
+		var err error
+		c.msgIdAlloc, err = lru.New(1000)
+		if err != nil {
+			panic(err)
+		}
 	}
-	c.msgId.Store(conID, v.(int)+1)
-	return (v.(uint)) + 1
+	if !c.msgIdAlloc.Contains(conID) {
+		c.msgIdAlloc.Add(conID, 0)
+	}
+	v, _ := c.msgIdAlloc.Get(conID)
+	c.msgIdAlloc.Add(conID, (v.(int))+1)
+	return ((v.(int)) + 1)
 }
+func (c *Client) filterMsg(conID string, msgId int) bool {
+	if nil == c.msgIdCache {
+		c.msgIdCache, _ = lru.New(10000)
+	}
+	k := conID + "-" + strconv.Itoa(int(msgId))
+	if c.msgIdCache.Contains(k) {
+		return false
+	}
+	c.msgIdCache.Add(k, true)
+	return true
+}
+
 func (s *Server) forward2Target(udp *net.UDPConn, rawData []byte) {
 	udp.Write(rawData)
 }
@@ -254,14 +279,34 @@ func (s *Server) ListenMiddleAnd2Target(port int, targetServer string) {
 		}
 		v2 := v.(*net.UDPConn)
 		//fmt.Println("发送消息到目标")
-		s.forward2Target(v2, msg.Data)
+		if s.filterMsg(conID, msg.MsgID) {
+			s.forward2Target(v2, msg.Data)
+		}
 	}
 }
-func (s *Server) getMsgID(conID string) uint {
-	v, ok := s.msgId.LoadOrStore(conID, 0)
-	if !ok {
-		panic("err")
+func (s *Server) getMsgID(conID string) int {
+	if s.msgIdAlloc == nil {
+		var err error
+		s.msgIdAlloc, err = lru.New(1000)
+		if err != nil {
+			panic(err)
+		}
 	}
-	s.msgId.Store(conID, v.(int)+1)
-	return (v.(uint)) + 1
+	if !s.msgIdAlloc.Contains(conID) {
+		s.msgIdAlloc.Add(conID, 0)
+	}
+	v, _ := s.msgIdAlloc.Get(conID)
+	s.msgIdAlloc.Add(conID, (v.(int))+1)
+	return ((v.(int)) + 1)
+}
+func (s *Server) filterMsg(conID string, msgId int) bool {
+	if nil == s.msgIdCache {
+		s.msgIdCache, _ = lru.New(10000)
+	}
+	k := conID + "-" + strconv.Itoa(int(msgId))
+	if s.msgIdCache.Contains(k) {
+		return false
+	}
+	s.msgIdCache.Add(k, true)
+	return true
 }
