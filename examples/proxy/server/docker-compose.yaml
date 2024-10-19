@@ -1,0 +1,17 @@
+version: '3'
+services:
+  gost:
+    image: ginuerzh/gost
+    restart: always
+    command: "-L kcp://:12312"
+  proxy:
+    image: golangboyme/multipathudp
+    restart: always
+    expose:
+      - 18443
+    ports:
+      - "18443:18443/udp"
+    environment:
+      t: "gost:12312"
+    depends_on:
+      - gost
