@@ -26,4 +26,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           context: .
           push: true
-          tags: golangboyme/multiPathUdp
+          tags: golangboyme/multipathudp
