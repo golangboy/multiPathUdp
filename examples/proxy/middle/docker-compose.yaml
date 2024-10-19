@@ -1,0 +1,12 @@
+version: '3'
+services:
+  gost:
+    image: ginuerzh/gost
+    restart: always
+    ports:
+      - "6666:6666/udp"
+    expose:
+      - 6666
+    command: "-L udp://:6666/${TARGET_HOST}"
+    environment:
+      - TARGET_HOST=${TARGET_HOST}
