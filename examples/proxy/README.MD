@@ -1,15 +1,17 @@
 # client
 ```bash
 cd client
+export GOST_PORT=1080
 export MIDDLE_SERVERS=middle1:6666 middle2:6666
 docker-compose up -d
 ```
-> socks5 will listen at port 17170,then the traffic will forward to server via middle1 and middle2
+> socks5 will listen at port 1080,then the traffic will forward to server via middle1 and middle2
 
 
 # server
 ```bash
 cd server
+export GOST_PORT=18443
 docker-compose up -d
 ```
 > server will listen at port 18443
@@ -17,6 +19,7 @@ docker-compose up -d
 # middle
 ```bash
 cd middle
+export GOST_PORT=6666
 export TARGET_HOST=server:18443
 docker-compose up -d
 ```
