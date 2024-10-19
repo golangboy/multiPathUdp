@@ -17,6 +17,8 @@ type LocalUdpConn struct {
 type Client struct {
 	msgIdAlloc *lru.Cache
 	msgIdCache *lru.Cache
+	laddrsConn []*net.UDPConn
+	middleAddr []*net.UDPAddr
 }
 type Server struct {
 	msgIdAlloc *lru.Cache
@@ -36,7 +38,7 @@ func ConvertAddr(addr net.Addr) net.UDPAddr {
 	return *v
 }
 
-func (c *LocalUdpConn) WriteMessage(ID string, msgId int, Data []byte) (int, error) {
+func (c *LocalUdpConn) WriteMessage(ID string, msgId int, Data []byte, addr net.Addr) (int, error) {
 	msg := Message{ID, msgId, Data}
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
@@ -44,7 +46,7 @@ func (c *LocalUdpConn) WriteMessage(ID string, msgId int, Data []byte) (int, err
 	if err != nil {
 		return 0, err
 	}
-	return c.Write(buf.Bytes())
+	return c.WriteTo(buf.Bytes(), addr)
 }
 func (c *LocalUdpConn) ReadMessage() (*Message, error) {
 	var msg Message
@@ -77,44 +79,37 @@ func (c *LocalUdpConn) ReadFromMessage() (*Message, net.UDPAddr, error) {
 	}
 	return &msg, udpAddr, nil
 }
-func (c *LocalUdpConn) WriteToMessage(ID string, msgId int, addr *net.UDPAddr, Data []byte) (int, error) {
-	msg := Message{ID, msgId, Data}
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(msg)
-	if err != nil {
-		return 0, err
-	}
-	return c.WriteTo(buf.Bytes(), addr)
-}
-func (c *Client) connect2Middle(middleServers []string) []*net.UDPConn {
-	var middle []*net.UDPConn
+func (c *Client) connect2Middle(middleServers []string) {
+	var middle []*net.UDPAddr
+	var laddrs []*net.UDPConn
 	for _, server := range middleServers {
 		addr, err := net.ResolveUDPAddr("udp", server)
 		if err != nil {
 			panic(err)
 
 		}
-		dial, err := net.DialUDP("udp4", nil, addr)
+		laddr, err := net.ListenUDP("udp", nil)
 		if err != nil {
-			//fmt.Println(err)
-			continue
+			panic(err)
 		}
-		middle = append(middle, dial)
+		laddrs = append(laddrs, laddr)
+		middle = append(middle, addr)
 	}
-	return middle
+	c.laddrsConn = laddrs
+	c.middleAddr = middle
+	return
 }
-func (c *Client) forward2Middle(conId string, rawData []byte, middle []*net.UDPConn) {
+func (c *Client) forward2Middle(conId string, rawData []byte) {
 	msgId := c.getMsgID(conId)
-	for _, m := range middle {
-		m2 := ConvertUDP(m)
-		m2.WriteMessage(conId, msgId, rawData)
+	for i, _ := range c.middleAddr {
+		m2 := ConvertUDP(c.laddrsConn[i])
+		m2.WriteMessage(conId, msgId, rawData, c.middleAddr[i])
 		//fmt.Println(i)
 	}
 }
-func (c *Client) listenMiddleAnd2client(udp *net.UDPConn, id2conId *sync.Map, middle []*net.UDPConn) {
-	for _, m := range middle {
-		m2 := ConvertUDP(m)
+func (c *Client) listenMiddleAnd2client(udp *net.UDPConn, id2conId *sync.Map) {
+	for i, _ := range c.middleAddr {
+		m2 := ConvertUDP(c.laddrsConn[i])
 		go func() {
 			for {
 				//fmt.Println("listenMiddle0", m.LocalAddr(), m.RemoteAddr())
@@ -145,27 +140,23 @@ func (c *Client) ListenRawAnd2Middle(port int, middleServers []string) {
 		panic(err)
 		return
 	}
-	ms := c.connect2Middle(middleServers)
-	if ms == nil || len(ms) == 0 {
-		panic("connect failed")
-		return
-	}
+	c.connect2Middle(middleServers)
 	var id2conId sync.Map //string net.Addr
 
-	c.listenMiddleAnd2client(udp, &id2conId, ms)
+	c.listenMiddleAnd2client(udp, &id2conId)
 	// Read From Client
 	for {
 		//fmt.Println("来自raw client ka1")
 		n, addr, err := udp.ReadFrom(buffer[:])
 		//fmt.Println("来自raw client ka2", addr)
 		if err != nil {
-			return
+			continue
 		}
 		// simple treat addr as ID
 		conId := addr.String()
 		id2conId.LoadOrStore(conId, addr)
 		//fmt.Println("forward2Middle")
-		c.forward2Middle(conId, buffer[:n], ms)
+		c.forward2Middle(conId, buffer[:n])
 	}
 }
 func (c *Client) getMsgID(conID string) int {
@@ -217,7 +208,7 @@ func (s *Server) listenTargetAnd2middle(udpWithMiddle *LocalUdpConn, udpWithTarg
 		}
 		v2 := v.(mapset.Set)
 		v3 := v2.ToSlice()
-		//fmt.Println("middle", len(v3))
+		//fmt.Println("middleAddr", len(v3))
 		msgId := s.getMsgID(conId)
 		for _, v4 := range v3 {
 
@@ -228,7 +219,7 @@ func (s *Server) listenTargetAnd2middle(udpWithMiddle *LocalUdpConn, udpWithTarg
 				return
 			}
 			//fmt.Println("xiexie", v4, addr, string(buffer[:read]), udpWithMiddle.RemoteAddr(), udpWithMiddle.LocalAddr())
-			_, err = udpWithMiddle.WriteToMessage(conId, msgId, udpAddr, buffer[:read])
+			_, err = udpWithMiddle.WriteMessage(conId, msgId, buffer[:read], udpAddr)
 			if err != nil {
 				panic(err)
 				return
@@ -255,7 +246,7 @@ func (s *Server) ListenMiddleAnd2Target(port int, targetServer string) {
 		//fmt.Println(addr, "中间件收到消息", msg.ID, string(msg.Data))
 		conID := msg.ID
 
-		//save middle addr
+		//save middleAddr addr
 		v, _ := id2middle.LoadOrStore(conID, mapset.NewSet())
 		v.(mapset.Set).Add(addr.String())
 		//fmt.Println(v)
