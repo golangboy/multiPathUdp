@@ -1,6 +1,9 @@
-# multiPathUDP
+# multipathudp
 
 ## Overview
 
-multiPathUDP is tunnel that facilitates multi-path communication over UDP. It allows clients to send and receive
-messages through multiple middle servers, enhancing reliability and performance in network communication.
+multipathudp can forward UDP traffic through multiple middle servers to the target server, thereby improving the availability of the service.
+
+## examples
+
+[kcp proxy](examples/proxy/README.MD)
