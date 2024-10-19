@@ -52,6 +52,6 @@ jobs:
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v1
         with:
-          files: cmd/client/client_windows.exe,cmd/client/client_linux,cmd/client/client_macos,cmd/client/server_windows.exe,cmd/client/server_linux,cmd/client/server_macos
+          files: cmd/client/client_windows.exe,cmd/client/client_linux,cmd/client/client_macos,cmd/server/server_windows.exe,cmd/server/server_linux,cmd/server/server_macos
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
