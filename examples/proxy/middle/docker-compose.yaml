@@ -6,5 +6,3 @@ services:
     ports:
       - "${GOST_PORT:-18443}:6666/udp"
     command: "-L udp://:6666/${TARGET_HOST}"
-    environment:
-      - TARGET_HOST=${TARGET_HOST}
