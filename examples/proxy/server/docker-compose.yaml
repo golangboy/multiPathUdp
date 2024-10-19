@@ -7,10 +7,8 @@ services:
   proxy:
     image: golangboyme/multipathudp
     restart: always
-    expose:
-      - 18443
     ports:
-      - "18443:18443/udp"
+      - "${GOST_PORT:-18443}:18443/udp"
     environment:
       t: "gost:12312"
     depends_on:

@@ -4,7 +4,7 @@ services:
     image: ginuerzh/gost
     restart: always
     ports:
-      - "17170:17170"
+      - "${GOST_PORT:-17170}:17170"
     command: "-L socks5://:17170 -F kcp://proxy:8888"
     depends_on:
       - proxy
